@@ -4,19 +4,56 @@ import argparse
 import pathlib
 import pprint
 
-import numpy as np
+from ase import Atoms
 from mpi4py import MPI
 
 import motep.io
 from motep.active import AlgorithmBase, make_algorithm
 from motep.io.mlip.mtp import read_mtp
 from motep.io.utils import get_dummy_species, read_images
-from motep.setting import load_setting_grade
+from motep.potentials.mtp.data import MTPData
+from motep.setting import GradeSetting, load_setting_grade
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments."""
     parser.add_argument("setting")
+
+
+class Grader:
+    """Grader class for calculating grade."""
+
+    def __init__(
+        self,
+        images_training: list[Atoms],
+        mtp_data: MTPData,
+        setting: GradeSetting,
+        comm: MPI.Comm,
+    ):
+        self.setting = setting
+        algorithm_class = make_algorithm(self.setting.algorithm)
+        self.optimality: AlgorithmBase = algorithm_class(
+            images_training,
+            mtp_data,
+            setting.engine,
+            rng=setting.rng,
+        )
+        self.comm = comm
+
+    def update(self, new_images: list[Atoms]) -> None:
+        """Update the optimality."""
+        self.optimality.update(new_images)
+
+    def grade(self, images_in: list) -> None:
+        """Calculate grades for images."""
+        if self.comm.rank == 0:
+            print(f"{'':=^72s}\n")
+            print("[data_active]")
+            print(self.optimality.indices)
+            print(flush=True)
+
+        self.optimality.calc_grade(images_in)
+        return [_.info["MV_grade"] for _ in images_in]
 
 
 def grade(filename_setting: str, comm: MPI.Comm) -> None:
@@ -30,9 +67,7 @@ def grade(filename_setting: str, comm: MPI.Comm) -> None:
         pprint.pp(setting)
         print(flush=True)
 
-    rng = np.random.default_rng(setting.seed)
-
-    mtp_file = str(pathlib.Path(setting.potential_final).resolve())
+    mtp_file = str(pathlib.Path(setting.potential_final).expanduser().resolve())
 
     species = setting.species or None
     images_training = read_images(
@@ -51,29 +86,14 @@ def grade(filename_setting: str, comm: MPI.Comm) -> None:
         msg = "`mlippy` engine is not available for `motep grade`"
         raise ValueError(msg)
 
-    algorithm_class = make_algorithm(setting.algorithm)
-
-    optimality: AlgorithmBase = algorithm_class(
-        images_training,
-        mtp_data,
-        setting.engine,
-        rng=rng,
-    )
-
-    if rank == 0:
-        print(f"{'':=^72s}\n")
-        print("[data_active]")
-        print(optimality.indices)
-        print(flush=True)
-
+    grader = Grader(images_training, mtp_data, setting, comm)
     images_in = read_images(
         setting.data_in,
         species=species,
         comm=comm,
         title="data_in",
     )
-
-    optimality.calc_grade(images_in)
+    grader.grade(images_in)
 
     motep.io.write(setting.data_out[0], images_in)
 
