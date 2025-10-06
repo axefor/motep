@@ -29,11 +29,13 @@ class Trainer:
         mtp_data: MTPData,
         setting: TrainSetting,
         comm: MPI.Comm,
+        verbose: int = 3,
     ) -> None:
         """Initialize."""
         self.mtp_data = mtp_data
         self.setting = setting
         self.comm = comm
+        self.verbose = verbose
 
     def train(self, images: list[Atoms]) -> LossFunction:
         """Train."""
@@ -47,29 +49,31 @@ class Trainer:
 
         for i, step in enumerate(self.setting.steps):
             with measure_time(f"step {i}: {step['method']}", self.comm):
-                rank = self.comm.Get_rank()
-                if rank == 0:
+                # Print step info
+                if self.comm.rank == 0 and self.verbose >= 2:
                     print(f"{'':=^72s}\n")
                     pprint.pp(step)
                     print(flush=True)
 
-                # Print parameters before optimization.
                 self.mtp_data.initialize(self.setting.rng)
-                if rank == 0:
+
+                # Print parameters before optimization.
+                if self.comm.rank == 0 and self.verbose >= 3:
                     self.mtp_data.print(flush=True)
 
                 # Instantiate an `Optimizer` class
                 optimizer: OptimizerBase = make_optimizer(step["method"])(loss, **step)
                 optimizer.optimize(**step.get("kwargs", {}))
                 loss.broadcast()  # be sure that all processes have the same data
-                if rank == 0:
-                    print(flush=True)
-
-                    # Print parameters after optimization.
-                    self.mtp_data.print(flush=True)
-
+                if self.comm.rank == 0 and step.get("write", True):
                     write_mtp(f"intermediate_{i}.mtp", self.mtp_data)
 
+                # Print parameters after optimization.
+                if self.comm.rank == 0 and self.verbose >= 2:
+                    print(flush=True)
+                    self.mtp_data.print(flush=True)
+
+                if self.comm.rank == 0 and self.verbose >= 1:
                     ErrorPrinter(loss).print(flush=True)
 
         return loss
