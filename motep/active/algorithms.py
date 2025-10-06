@@ -29,11 +29,15 @@ class AlgorithmBase(ABC):
         rng: np.random.Generator,
     ) -> None:
         """Active-set finder."""
-        self.images_training = images_training
         self.mtp_data = mtp_data
         self.engine = engine
         self.rng = rng
 
+        self.update(images_training)
+
+    def update(self, new_images: list[Atoms]) -> None:
+        """Reevaluates the matrix and active set and sets `images_training`."""
+        self.images_training = new_images
         self.matrix = self.calc_matrix(self.images_training)
         self.indices = []
 
