@@ -69,6 +69,11 @@ class Evaluator:
                 relax_magmoms=self.relax_magmoms,
             )
             atoms.calc.targets = targets
+
+            # Special handling of magmoms, since they can be both results and input
+            if "magmoms" in targets:
+                atoms.set_initial_magnetic_moments(targets["magmoms"])
+
             energy = atoms.get_potential_energy()
             logger.info("configuration %d: %s", i, energy)
 
