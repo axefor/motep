@@ -82,8 +82,7 @@ class Evaluator:
                 atoms.set_initial_magnetic_moments(targets["magmoms"])
 
             energy = atoms.get_potential_energy()
-            if self.comm.rank == 0:
-                logger.info("configuration %d: %s", i, energy)
+            logger.info("configuration %d: %s", i, energy)
 
         return images_eval
 
