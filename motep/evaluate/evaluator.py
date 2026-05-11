@@ -5,12 +5,14 @@ from copy import copy
 from pathlib import Path
 from pprint import pformat
 
+from ase import Atoms
+
 import motep.io
 from motep.calculator import make_calculator
 from motep.io.mlip.mtp import read_mtp
 from motep.io.utils import get_dummy_species, read_images
 from motep.loss import ErrorPrinter
-from motep.parallel import DummyMPIComm
+from motep.parallel import DummyMPIComm, world
 from motep.potentials.mtp.data import MTPData
 
 from .setting import load_setting_evaluate
@@ -25,7 +27,9 @@ class Evaluator:
         self,
         mtp_data: MTPData,
         engine: str = "cext",
+        *,
         relax_magmoms: bool | None = None,
+        comm: DummyMPIComm = world,
     ) -> None:
         """Initialize Evaluator.
 
@@ -37,13 +41,16 @@ class Evaluator:
             Engine to use for calculations ("numpy", "numba", "jax", "cext", etc.).
         relax_magmoms : bool or None
             Whether to relax magnetic moments.  ``None`` uses mode-based default.
+        comm : MPI.Comm
+            MPI communicator.
 
         """
         self.mtp_data = mtp_data
         self.engine = engine
         self.relax_magmoms = relax_magmoms
+        self.comm = comm
 
-    def evaluate(self, images: list) -> list:
+    def evaluate(self, images: list[Atoms]) -> list[Atoms]:
         """Run MTP calculations on images.
 
         Parameters
@@ -69,6 +76,11 @@ class Evaluator:
                 relax_magmoms=self.relax_magmoms,
             )
             atoms.calc.targets = targets
+
+            # Special handling of magmoms, since they can be both results and input
+            if "magmoms" in targets:
+                atoms.set_initial_magnetic_moments(targets["magmoms"])
+
             energy = atoms.get_potential_energy()
             logger.info("configuration %d: %s", i, energy)
 
@@ -113,6 +125,7 @@ def evaluate_from_setting(filename_setting: str, comm: DummyMPIComm) -> None:
         mtp_data,
         engine=setting.common.engine,
         relax_magmoms=setting.common.relax_magmoms,
+        comm=comm,
     )
     images_final = evaluator.evaluate(images_initial)
 
